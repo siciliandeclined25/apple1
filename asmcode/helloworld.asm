@@ -1,2 +1,5 @@
 LDA #$01
-STA $D012
+bird:
+STA $03,X
+LDA $D012
+BEQ bird
