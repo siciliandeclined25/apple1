@@ -14,7 +14,10 @@ pub const YZEROPAGE: u8 = 9;
 pub const INDIRECT: u8 = 10;
 pub const XINDIRECT: u8 = 11;
 pub const YINDIRECT: u8 = 12;
-pub const MAXINSTRUCTIONHEIGHT: u8 = 12;
+pub const ABSOLUTELABEL: u8 = 13;
+pub const XABSOLUTELABEL: u8 = 14;
+pub const YABSOLUTELABEL: u8 = 15;
+pub const MAXINSTRUCTIONHEIGHT: u8 = 15;
 
 pub fn get_opcode(namespace: &str, addressingMode: u8) -> u8 {
     //A function to return the opcode given the namespace of the function
@@ -79,7 +82,7 @@ pub fn get_opcode(namespace: &str, addressingMode: u8) -> u8 {
             "BVS" => 0x70,
             _ => 0xFF, //nop
         },
-        ABSOLUTE => match namespace {
+        ABSOLUTE | ABSOLUTELABEL => match namespace {
             "ADC" => 0x6D,
             "AND" => 0x2D,
             "ASL" => 0x0E,
@@ -105,7 +108,7 @@ pub fn get_opcode(namespace: &str, addressingMode: u8) -> u8 {
             "STY" => 0x8C,
             _ => 0xFF, //nop
         },
-        XABSOLUTE => match namespace {
+        XABSOLUTE | XABSOLUTELABEL => match namespace {
             "ADC" => 0x7D,
             "AND" => 0x3D,
             "ASL" => 0x1E,
@@ -123,7 +126,7 @@ pub fn get_opcode(namespace: &str, addressingMode: u8) -> u8 {
             "STA" => 0x9D,
             _ => 0xFF,
         },
-        YABSOLUTE => match namespace {
+        YABSOLUTE | YABSOLUTELABEL => match namespace {
             "ADC" => 0x79,
             "AND" => 0x39,
             "CMP" => 0xD9,
@@ -213,6 +216,12 @@ pub fn get_opcode(namespace: &str, addressingMode: u8) -> u8 {
         _ => 0xFF, //handle non-numeric assignments
     }
 }
+pub fn display_code(assembled_code: &Vec<u8>) -> () {
+    for (i, value) in assembled_code.iter().enumerate() {
+        println!("{:#x} @ {:#x}", value, i);
+    }
+    return ();
+}
 pub fn get_address_as_string(addressint: u8) -> &'static str {
     return match addressint {
         0 => "IMM (immediate)",
@@ -228,11 +237,15 @@ pub fn get_address_as_string(addressint: u8) -> &'static str {
         10 => "IND (indirect)",
         11 => "XIND (indirect + x)",
         12 => "YIND (indirect + y)",
-        _ => "no addressing mode found",
+        13 => "ABSL (absolute value from label) (same as ABS)",
+        14 => "XABSL (absolute value from label + x) (same as XABS)",
+        15 => "YABSL (absolute value from label + y) (same as YABS)",
+
+        _ => "no addressing mode",
     };
 }
-pub fn is_ascii_letters_only(char_vector: Vec<char>) -> bool {
-    for maybe_letter_char in &char_vector {
+pub fn is_ascii_letters_only(char_vector: &Vec<char>) -> bool {
+    for maybe_letter_char in char_vector {
         //turn the letter of the ascii_letter_char into
         // an unsigned integer by accessing the pointer value
         // of the protected borrowed vector and interperting
@@ -241,10 +254,9 @@ pub fn is_ascii_letters_only(char_vector: Vec<char>) -> bool {
         let ascii_of_letter = *maybe_letter_char as u8;
         //check if it's within the range of valid ascii letters
         // from A-Z then a-z
-        if !(ascii_of_letter >= 65
-            || ascii_of_letter <= 90
-            || ascii_of_letter >= 97
-            || ascii_of_letter <= 122)
+        if !(ascii_of_letter == 32
+            || (ascii_of_letter >= 65 && ascii_of_letter <= 90)
+            || (ascii_of_letter >= 97 && ascii_of_letter <= 122))
         {
             return false;
         }
@@ -254,6 +266,11 @@ pub fn is_ascii_letters_only(char_vector: Vec<char>) -> bool {
 }
 pub fn get_addressing_mode(char_of_line: Vec<char>) -> u8 {
     let mut instruction_type = MAXINSTRUCTIONHEIGHT + 1;
+    //some quick implicit checking to make sure it's not relative because then
+    // it messes up the lengths
+    if char_of_line.len() <= 3 {
+        return IMPLIED;
+    }
     if char_of_line[4] == '#' {
         //now we assign immediate addressing
         //LDA #$03 or (A <-- 3)
@@ -281,18 +298,35 @@ pub fn get_addressing_mode(char_of_line: Vec<char>) -> u8 {
             //this means it's a simple zeropage instruction
             instruction_type = ZEROPAGE;
         }
-    } else if is_ascii_letters_only(char_of_line) {
+    } else if is_ascii_letters_only(&char_of_line) {
         //quick cheap trick-- all relative instructions
         //will syntaxically only use upper and lowercase ascii
         //so we can simplify the assembly this way.
-        instruction_type = RELATIVE;
+        // butttt we can also have absolute addressing with labels
+        // and we can have indirect addressing with JMP
+        // here's the trick
+        let namespace = &char_of_line[..3].iter().collect::<String>();
+        //all relative addressing modes start with b
+        // only one starts with b from absolute and it's BIT
+        if &char_of_line[0] == &'B' && &namespace != &"BIT" {
+            instruction_type = RELATIVE;
+        } else {
+            //then it must be an absolute
+            instruction_type = ABSOLUTELABEL;
+            if char_of_line[char_of_line.len() - 1] == 'X' && char_of_line.len() == 11 {
+                instruction_type = XABSOLUTELABEL;
+            }
+            if char_of_line[char_of_line.len() - 1] == 'Y' && char_of_line.len() == 11 {
+                instruction_type = YABSOLUTELABEL;
+            }
+        }
     } else {
         instruction_type = MAXINSTRUCTIONHEIGHT + 1; //error instruction
     }
     return instruction_type;
 }
 
-pub fn compile(buf: &str) -> &str {
+pub fn compile(buf: &str) -> bool {
     //first part, let's split the buffer to
     // a vector based on \n
     let mut tokenList: Vec<u8> = Vec::new();
@@ -306,7 +340,8 @@ pub fn compile(buf: &str) -> &str {
     // address where the assembler should fill back in
     let mut labels_n_references_hashmap: HashMap<&str, u16> = HashMap::new();
     //this hashmap represents the label and it's location and is assembled while being compiled
-    let mut labels_n_locations_hashmap: HashMap<&str, Vec<u16>> = HashMap::new();
+    let mut absolute_labels_n_locations_hashmap: HashMap<&str, Vec<u16>> = HashMap::new();
+    let mut relative_labels_n_locations_hashmap: HashMap<&str, Vec<u16>> = HashMap::new();
 
     //second, let's iterate through the line
     // through each iteration we will append the correct byte(s)
@@ -340,10 +375,18 @@ pub fn compile(buf: &str) -> &str {
         } else {
             // yes instruction exists
             println!("{}", &line);
-            let byte_index_third_char = line.char_indices().nth(3).unwrap().0;
-            let opcode_namespace: &str = &line[..byte_index_third_char];
+            let opcode_namespace: &str;
+            let address_in_string: &str;
+            if line.len() > 3 {
+                let byte_index_third_char = line.char_indices().nth(3).unwrap().0;
+                opcode_namespace = &line[..byte_index_third_char];
+                address_in_string = &line[byte_index_third_char + 1..];
+            } else {
+                opcode_namespace = line;
+                address_in_string = "";
+            }
+
             //the plus one is to offset the character space between the opcode and instruction
-            let address_in_string: &str = &line[byte_index_third_char + 1..];
             let char_of_line: Vec<char> = line.chars().collect(); //makes std:str:char iterator
             let mut instruction_type: u8 = get_addressing_mode(char_of_line);
             //let's determine what type of instruction it is
@@ -396,7 +439,7 @@ pub fn compile(buf: &str) -> &str {
                 // but first regardless of what we have this should be overwritten but
                 // we need to push a byte anyways
                 assembled_code.push(0x00);
-                if labels_n_locations_hashmap.contains_key(&address_in_string) {
+                if relative_labels_n_locations_hashmap.contains_key(&address_in_string) {
                     //weird convention but it's like with as in python
                     // we're getting a mutable reference to the Vec
                     // which i believe means that we allocate memory
@@ -406,7 +449,9 @@ pub fn compile(buf: &str) -> &str {
                         program_simulated_pointer,
                         program_simulated_pointer - 1 // we have to use minus two in order to return from the relative addr and opcode associated
                     );
-                    if let Some(vector) = labels_n_locations_hashmap.get_mut(&address_in_string) {
+                    if let Some(vector) =
+                        relative_labels_n_locations_hashmap.get_mut(&address_in_string)
+                    {
                         //vector is a Vec<u16> with every address
                         vector.push(program_simulated_pointer);
                         //we just push this to the vector stored inside
@@ -414,10 +459,7 @@ pub fn compile(buf: &str) -> &str {
                     }
                     program_simulated_pointer += 1;
                 } else {
-                    println!(
-                        "ADDR: {:#x} ----> 0x00\nat the disco -- ^^^^^ warning 2\nthe assembler is using a stopgap. this is not the correct relative address \nthis is a temporary relative address\nafter basic tokenization the assembler will come back and fix this. if your program unexpectedly breaks, then your label is not defined in memory\n the assembler will attempt to fix this for you",
-                        program_simulated_pointer
-                    );
+                    println!("ADDR: {:#x} ----> 0x00", program_simulated_pointer);
                     //memory_pointer_vect creates a new memory vect and allow us to store a
                     // new key/value pair into the hashmap
                     // first we'll create it
@@ -427,52 +469,175 @@ pub fn compile(buf: &str) -> &str {
                     //lastly, we'll append the key/value pair where
                     // key: &str (namespace of label)
                     // value: Vec<u16> (memory_pointer)
-                    labels_n_locations_hashmap.insert(&address_in_string, memory_pointer_vect);
+                    relative_labels_n_locations_hashmap
+                        .insert(&address_in_string, memory_pointer_vect);
                 }
             } else if (instruction_type == XABSOLUTE
                 || instruction_type == YABSOLUTE
                 || instruction_type == ABSOLUTE
-                || instruction_type == INDIRECT)
+                || instruction_type == INDIRECT
+                || instruction_type == ABSOLUTELABEL
+                || instruction_type == XABSOLUTELABEL
+                || instruction_type == YABSOLUTELABEL)
             {
                 //this means we have to assemble the text into two parrts
                 // and flip the order(little endian) so that it's
                 // [opcode] [low] [high]
                 // see comments on other addressing for explanation on code
-                let hexish: String = address_in_string
-                    .chars()
-                    .filter(|c| c.is_ascii_digit() || matches!(c, 'a'..='f' | 'A'..='F'))
-                    .collect();
-                let signed_address = u16::from_str_radix(&hexish, 16).unwrap();
-                let [lo, hi] = signed_address.to_le_bytes(); // little-endian order
+                // first check to see if there's only characters in this
+                // because we could be using a label
                 println!(
-                    "ADDR: {:#x} ----> {:#x}\nADDR: {:#x} ----> {:#x}",
-                    program_simulated_pointer,
-                    lo,
-                    program_simulated_pointer + 1,
-                    hi
+                    "is ascii only {}",
+                    is_ascii_letters_only(&address_in_string.chars().collect())
                 );
-                program_simulated_pointer += 2;
+                if is_ascii_letters_only(&address_in_string.chars().collect()) {
+                    //so this is a label because the address is purely strings
+                    //even FF would have # or $ this checks for letters too
+                    if absolute_labels_n_locations_hashmap.contains_key(&address_in_string) {
+                        if let Some(vector) =
+                            absolute_labels_n_locations_hashmap.get_mut(&address_in_string)
+                        {
+                            //vector is a Vec<u16> with every address
+                            vector.push(program_simulated_pointer);
+                            //we just push this to the vector stored inside
+                            //weird conventioning but so memory safe!!!!
+                        }
+                    } else {
+                        //memory_pointer_vect creates a new memory vect and allow us to store a
+                        // new key/value pair into the hashmap
+                        // first we'll create it
+                        let mut memory_pointer_vect: Vec<u16> = Vec::new();
+                        // then we'll push the program pointer (where the program is)
+                        memory_pointer_vect.push(program_simulated_pointer);
+                        //lastly, we'll append the key/value pair where
+                        // key: &str (namespace of label)
+                        // value: Vec<u16> (memory_pointer)
+                        absolute_labels_n_locations_hashmap
+                            .insert(&address_in_string, memory_pointer_vect);
+                    }
+
+                    //push two bytes to later replace
+                    //and increment the program by two
+                    assembled_code.push(0x00);
+                    assembled_code.push(0x00);
+                    println!(
+                        "ADDR: {:#x} ----> {:#x}\nADDR: {:#x} ----> {:#x}",
+                        program_simulated_pointer,
+                        0x00,
+                        program_simulated_pointer + 1,
+                        0x00
+                    );
+                    program_simulated_pointer += 2;
+                } else {
+                    println!("doing this instead");
+                    //we just have a normal absolute not a special one.
+                    //this string check doesn't need to be done now that the assembler does it
+                    // to determine whether it's a label type or not but it's here still
+                    // todo <-- fix this?
+                    let hexish: String = address_in_string
+                        .chars()
+                        .filter(|c| c.is_ascii_digit() || matches!(c, 'a'..='f' | 'A'..='F'))
+                        .collect();
+                    let signed_address = u16::from_str_radix(&hexish, 16).unwrap();
+                    let [lo, hi] = signed_address.to_le_bytes(); // little-endian order
+                    println!(
+                        "ADDR: {:#x} ----> {:#x}\nADDR: {:#x} ----> {:#x}",
+                        program_simulated_pointer,
+                        lo,
+                        program_simulated_pointer + 1,
+                        hi
+                    );
+                    assembled_code.push(lo);
+                    assembled_code.push(hi);
+                    program_simulated_pointer += 2;
+                }
             //now we must turn the signed_address into two u8 numbers
             } else {
                 //we have just a normal value, nothing fancy, single 1 byte unsigned addressing
-                //turns and iterates gets if char ought to have filter and then matches on capital/lower
-                let hexish: String = address_in_string
-                    .chars()
-                    .filter(|c| c.is_ascii_digit() || matches!(c, 'a'..='f' | 'A'..='F'))
-                    .collect();
-                //now converts &hexish reference to unsigned_address
-                let unsigned_address = u8::from_str_radix(&hexish, 16).unwrap();
-                //let's push it
-                assembled_code.push(unsigned_address);
-                //increment the program counter
-                println!(
-                    "ADDR: {:#x} ----> {:#x}",
-                    program_simulated_pointer,
-                    unsigned_address // we have to use minus two in order to return from the relative addr and opcode associated
-                );
-                program_simulated_pointer += 1;
+                // UNLESS ITS IMPLIED!!!
+                // let's check the length real quick
+                if address_in_string.len() == 0 {
+                    //do nothing. it's implied. there is no addressing.
+                } else {
+                    //turns and iterates gets if char ought to have filter and then matches on capital/lower
+                    let hexish: String = address_in_string
+                        .chars()
+                        .filter(|c| c.is_ascii_digit() || matches!(c, 'a'..='f' | 'A'..='F'))
+                        .collect();
+                    //now converts &hexish reference to unsigned_address
+                    let unsigned_address = u8::from_str_radix(&hexish, 16).unwrap();
+                    //let's push it
+                    assembled_code.push(unsigned_address);
+                    //increment the program counter
+                    println!(
+                        "ADDR: {:#x} ----> {:#x}",
+                        program_simulated_pointer,
+                        unsigned_address // we have to use minus two in order to return from the relative addr and opcode associated
+                    );
+                    program_simulated_pointer += 1;
+                }
             }
         }
     }
-    return buf;
+    //before we compile the program, we must fill in the labels
+    println!("at the disco: doing afterparty cleanup (adding labels)");
+    println!("current code");
+    display_code(&assembled_code);
+    println!("assembling absolute values:");
+    for n in absolute_labels_n_locations_hashmap {
+        //first let's get the byte value of the label
+        let (label_namespace, occur_of_label) = n;
+        println!("absolute located at {:?}", &occur_of_label);
+        //now we have the label_namespace
+        let where_label_is: u16 = *labels_n_references_hashmap
+            .get(label_namespace)
+            .expect("label not found");
+        //convert this to low and high bytes
+        let [lo, hi] = where_label_is.to_le_bytes();
+        //now let's change the byte value at each related index
+        for reference in occur_of_label {
+            let index: usize = reference as usize;
+            assembled_code[index + 1] = lo;
+            assembled_code[index + 2] = hi;
+        }
+    }
+    display_code(&assembled_code);
+
+    println!("assembling relative values:");
+    for n in relative_labels_n_locations_hashmap {
+        //first let's get the byte value of the label
+        let (label_namespace, occur_of_label) = n;
+        println!("relative located at {:?}", &occur_of_label);
+        //our conversion requires us to take the
+        // where_is and convert it to a relative address,
+        // which means that it is +- n bytes away
+        // from the current address
+        let where_label_is: u16 = *labels_n_references_hashmap
+            .get(label_namespace)
+            .expect("label not found");
+        for reference in occur_of_label {
+            //why is this an i32? to error handle in the most robust way
+            // see this math is still valid no matter how big the int becomes
+            let relative_where_is: i32 = where_label_is as i32 - reference as i32;
+            // so now let's see if the relative is actually possible
+            // compare it between an i8 to another i8
+            if let Ok(rel) = i8::try_from(relative_where_is) {
+                println!("i feel");
+                let relative_where_is: i8 = rel;
+                let index: usize = reference as usize;
+                println!("{}", index);
+                println!("{:#x}", assembled_code[index]);
+                assembled_code[index] = relative_where_is as u8;
+            } else {
+                // out of range for 8-bit signed branch offset
+                panic!(
+                    "at the disco: error 2 - \nthe label and the relative address jump at {:?} cannot occur because the jump is too far away (-128,127) bytes\nconsider jumping to an intermittent label first",
+                    reference
+                )
+            }
+        }
+    }
+    println!("jfk was gay");
+    display_code(&assembled_code);
+    return true;
 }
