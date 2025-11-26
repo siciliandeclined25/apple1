@@ -329,7 +329,6 @@ pub fn get_addressing_mode(char_of_line: Vec<char>) -> u8 {
 pub fn compile(buf: &str) -> bool {
     //first part, let's split the buffer to
     // a vector based on \n
-    let mut tokenList: Vec<u8> = Vec::new();
     let parts: Vec<&str> = buf.lines().collect();
     let mut assembled_code: Vec<u8> = Vec::new();
     //this acts as a pointer which moves through the program
@@ -622,7 +621,6 @@ pub fn compile(buf: &str) -> bool {
             // so now let's see if the relative is actually possible
             // compare it between an i8 to another i8
             if let Ok(rel) = i8::try_from(relative_where_is) {
-                println!("i feel");
                 let relative_where_is: i8 = rel;
                 let index: usize = reference as usize;
                 println!("{}", index);
@@ -637,7 +635,6 @@ pub fn compile(buf: &str) -> bool {
             }
         }
     }
-    println!("jfk was gay");
     display_code(&assembled_code);
     return true;
 }
