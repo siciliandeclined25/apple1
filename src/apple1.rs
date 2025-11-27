@@ -21,9 +21,15 @@ impl Apple1 {
         };
         let mut buf = String::new(); // allocate string buffer
         file.read_to_string(&mut buf); // fill buffer
+        let cleaned = buf
+            .lines()
+            .map(|l| l.trim_start())
+            .collect::<Vec<_>>()
+            .join("\n");
         println!("found!");
-        println!("{}", &buf);
+        println!("{}", cleaned);
+
         println!("tokenizing...");
-        asm::compile(&buf);
+        asm::compile(&cleaned);
     }
 }

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io;
+use std::io::{self, Write};
 
 pub const IMMEDIATE: u8 = 0;
 pub const IMPLIED: u8 = 1;
@@ -18,6 +18,159 @@ pub const ABSOLUTELABEL: u8 = 13;
 pub const XABSOLUTELABEL: u8 = 14;
 pub const YABSOLUTELABEL: u8 = 15;
 pub const MAXINSTRUCTIONHEIGHT: u8 = 15;
+
+// converts 6502 opcode bytes to mnemonic strings
+pub fn decode_6502(op: &u8) -> &'static str {
+    match op {
+        0x00 => "brk",
+        0x01 => "ora (indirect,x)",
+        0x05 => "ora zeropage",
+        0x06 => "asl zeropage",
+        0x08 => "php",
+        0x09 => "ora immediate",
+        0x0a => "asl accumulator",
+        0x0d => "ora absolute",
+        0x0e => "asl absolute",
+
+        0x10 => "bpl",
+        0x11 => "ora (indirect),y",
+        0x15 => "ora zeropage,x",
+        0x16 => "asl zeropage,x",
+        0x18 => "clc",
+        0x19 => "ora absolute,y",
+        0x1d => "ora absolute,x",
+        0x1e => "asl absolute,x",
+
+        0x20 => "jsr",
+        0x21 => "and (indirect,x)",
+        0x24 => "bit zeropage",
+        0x25 => "and zeropage",
+        0x26 => "rol zeropage",
+        0x28 => "plp",
+        0x29 => "and immediate",
+        0x2a => "rol accumulator",
+        0x2c => "bit absolute",
+        0x2d => "and absolute",
+        0x2e => "rol absolute",
+
+        0x30 => "bmi",
+        0x31 => "and (indirect),y",
+        0x35 => "and zeropage,x",
+        0x36 => "rol zeropage,x",
+        0x38 => "sec",
+        0x39 => "and absolute,y",
+        0x3d => "and absolute,x",
+        0x3e => "rol absolute,x",
+
+        0x40 => "rti",
+        0x41 => "eor (indirect,x)",
+        0x45 => "eor zeropage",
+        0x46 => "lsr zeropage",
+        0x48 => "pha",
+        0x49 => "eor immediate",
+        0x4a => "lsr accumulator",
+        0x4c => "jmp absolute",
+        0x4d => "eor absolute",
+        0x4e => "lsr absolute",
+
+        0x60 => "rts",
+        0x61 => "adc (indirect,x)",
+        0x65 => "adc zeropage",
+        0x66 => "ror zeropage",
+        0x68 => "pla",
+        0x69 => "adc immediate",
+        0x6a => "ror accumulator",
+        0x6c => "jmp indirect",
+        0x6d => "adc absolute",
+        0x6e => "ror absolute",
+
+        0x70 => "bvs",
+        0x71 => "adc (indirect),y",
+        0x75 => "adc zeropage,x",
+        0x76 => "ror zeropage,x",
+        0x78 => "sei",
+        0x79 => "adc absolute,y",
+        0x7d => "adc absolute,x",
+        0x7e => "ror absolute,x",
+
+        0x90 => "bcc",
+        0x91 => "sta (indirect),y",
+        0x95 => "sta zeropage,x",
+        0x98 => "tya",
+        0x99 => "sta absolute,y",
+        0x9a => "txs",
+        0x9d => "sta absolute,x",
+
+        0xa0 => "ldy immediate",
+        0xa1 => "lda (indirect,x)",
+        0xa2 => "ldx immediate",
+        0xa4 => "ldy zeropage",
+        0xa5 => "lda zeropage",
+        0xa6 => "ldx zeropage",
+        0xa8 => "tay",
+        0xa9 => "lda immediate",
+        0xaa => "tax",
+        0xac => "ldy absolute",
+        0xad => "lda absolute",
+        0xae => "ldx absolute",
+
+        0xb0 => "bcs",
+        0xb1 => "lda (indirect),y",
+        0xb4 => "ldy zeropage,x",
+        0xb5 => "lda zeropage,x",
+        0xb6 => "ldx zeropage,y",
+        0xb8 => "clv",
+        0xb9 => "lda absolute,y",
+        0xba => "tsx",
+        0xbc => "ldy absolute,x",
+        0xbd => "lda absolute,x",
+        0xbe => "ldx absolute,y",
+
+        0xc0 => "cpy immediate",
+        0xc1 => "cmp (indirect,x)",
+        0xc4 => "cpy zeropage",
+        0xc5 => "cmp zeropage",
+        0xc6 => "dec zeropage",
+        0xc8 => "iny",
+        0xc9 => "cmp immediate",
+        0xca => "dex",
+        0xcc => "cpy absolute",
+        0xcd => "cmp absolute",
+        0xce => "dec absolute",
+
+        0xd0 => "bne",
+        0xd1 => "cmp (indirect),y",
+        0xd5 => "cmp zeropage,x",
+        0xd6 => "dec zeropage,x",
+        0xd8 => "cld",
+        0xd9 => "cmp absolute,y",
+        0xdd => "cmp absolute,x",
+        0xde => "dec absolute,x",
+
+        0xe0 => "cpx immediate",
+        0xe1 => "sbc (indirect,x)",
+        0xe4 => "cpx zeropage",
+        0xe5 => "sbc zeropage",
+        0xe6 => "inc zeropage",
+        0xe8 => "inx",
+        0xe9 => "sbc immediate",
+        0xea => "nop",
+        0xec => "cpx absolute",
+        0xed => "sbc absolute",
+        0xee => "inc absolute",
+
+        0xf0 => "beq",
+        0xf1 => "sbc (indirect),y",
+        0xf5 => "sbc zeropage,x",
+        0xf6 => "inc zeropage,x",
+        0xf8 => "sed",
+        0xf9 => "sbc absolute,y",
+        0xfd => "sbc absolute,x",
+        0xfe => "inc absolute,x",
+
+        _ => "illegal",
+    }
+}
 
 pub fn get_opcode(namespace: &str, addressingMode: u8) -> u8 {
     //A function to return the opcode given the namespace of the function
@@ -218,9 +371,20 @@ pub fn get_opcode(namespace: &str, addressingMode: u8) -> u8 {
 }
 pub fn display_code(assembled_code: &Vec<u8>) -> () {
     for (i, value) in assembled_code.iter().enumerate() {
-        println!("{:#x} @ {:#x}", value, i);
+        let decoded = decode_6502(value);
+        println!("{:#x} | {:#x} ({})", i, value, decoded);
     }
     return ();
+}
+
+pub fn ask() -> bool {
+    print!("yes/no: ");
+    io::stdout().flush().unwrap();
+
+    let mut s = String::new();
+    io::stdin().read_line(&mut s).unwrap();
+
+    matches!(s.trim().to_lowercase().as_str(), "y" | "yes")
 }
 pub fn get_address_as_string(addressint: u8) -> &'static str {
     return match addressint {
@@ -497,7 +661,8 @@ pub fn compile(buf: &str) -> bool {
                             absolute_labels_n_locations_hashmap.get_mut(&address_in_string)
                         {
                             //vector is a Vec<u16> with every address
-                            vector.push(program_simulated_pointer);
+                            // we have to push +1 otherwise it overwrites the opcode
+                            vector.push(program_simulated_pointer + 1);
                             //we just push this to the vector stored inside
                             //weird conventioning but so memory safe!!!!
                         }
@@ -528,7 +693,6 @@ pub fn compile(buf: &str) -> bool {
                     );
                     program_simulated_pointer += 2;
                 } else {
-                    println!("doing this instead");
                     //we just have a normal absolute not a special one.
                     //this string check doesn't need to be done now that the assembler does it
                     // to determine whether it's a label type or not but it's here still
@@ -592,12 +756,12 @@ pub fn compile(buf: &str) -> bool {
             .get(label_namespace)
             .expect("label not found");
         //convert this to low and high bytes
-        let [lo, hi] = where_label_is.to_le_bytes();
+        let [low, hi] = where_label_is.to_le_bytes();
         //now let's change the byte value at each related index
         for reference in occur_of_label {
             let index: usize = reference as usize;
-            assembled_code[index + 1] = lo;
-            assembled_code[index + 2] = hi;
+            assembled_code[index] = low;
+            assembled_code[index + 1] = hi;
         }
     }
     display_code(&assembled_code);
@@ -636,5 +800,14 @@ pub fn compile(buf: &str) -> bool {
         }
     }
     display_code(&assembled_code);
+    println!(
+        "would you like to include a copy of WOZMON (the Apple 1 system software) in your memory file?"
+    );
+    let include_wozmon: bool = ask();
+
+    let mut file = std::fs::File::create("out.bin").unwrap();
+    for n in assembled_code {
+        file.write_all(&n.to_le_bytes());
+    }
     return true;
 }
