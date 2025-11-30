@@ -57,7 +57,7 @@ impl Apple1 {
         println!("tokenizing...");
         asm::compile(&cleaned);
         println!("executing...");
-        let mut execute_code: Vec<u8> = load_bytes("mem.b");
+        let mut execute_code: Vec<u8> = load_bytes("out.bin");
         run_file(&mut execute_code);
     }
 }
@@ -86,7 +86,7 @@ pub fn run_file(bytes_given: &mut Vec<u8>) -> bool {
     let mut x: u8 = 0;
     let mut y: u8 = 0;
     let mut stack_pointer: u16 = 0xfd;
-    let mut program_counter: u8 = 0;
+    let mut program_counter: u16 = 0;
     let mut flag_register: u8 = 0b00000000;
     let ram: &mut Vec<u8> = bytes_given; //for somereason there's an unused always high
     // bit value in the flag register
@@ -94,8 +94,11 @@ pub fn run_file(bytes_given: &mut Vec<u8>) -> bool {
     //interrupt so that when the computer is started it
     // is essentially reset
     flag_register = set_flag(flag_register, &INTERRUPTB, true);
-    println!("{}", flag_register);
+    println!("{:?}", ram);
+    let mut i: u16 = 0;
     while true {
+        i += 1;
+        println!("{}", i);
         let mut program_counter_change: u8 = 0;
         let opcode_given = ram[program_counter as usize];
         let next_byte = ram[(program_counter + 1) as usize];
@@ -105,14 +108,15 @@ pub fn run_file(bytes_given: &mut Vec<u8>) -> bool {
             &mut a,
             &mut x,
             &mut y,
-            stack_pointer,
+            &mut stack_pointer,
             next_byte,
             next_next_byte,
             ram,
             &mut flag_register,
+            &mut program_counter,
         );
-        println!("{}", a);
-        program_counter += program_counter_change;
+        println!("the a is {}", a);
+        program_counter += program_counter_change as u16;
     }
 
     return true;
@@ -123,14 +127,59 @@ pub fn execute_opcode(
     a: &mut u8,
     x: &mut u8,
     y: &mut u8,
-    stack_pointer: u16,
+    stack_pointer: &mut u16,
     next_byte: u8,
     next_next_byte: u8,
     ram: &mut Vec<u8>,
     flag_register: &mut u8,
+    program_counter: &mut u16,
 ) -> u8 {
     let mut push_program_counter: u8 = 0;
     match opcode_given {
+        //Register control block
+        0xAA | 0x8A | 0xCA | 0xE8 | 0xA8 | 0x98 | 0x88 | 0xC8 => {
+            let register_ctrl_match: () = match opcode_given {
+                //TAX & INX and DEX
+                0xAA | 0xCA | 0xE8 => {
+                    if opcode_given == 0xAA {
+                        *a = *x; //TAX
+                    } else {
+                        if opcode_given != 0xe8 {
+                            *x = x.saturating_sub(1); //INX
+                        } else {
+                            *x = x.saturating_add(1); //DEX
+                        }
+                    }
+                }
+                //TAY & INY and DEY
+                0xA8 | 0x88 | 0xC8 => {
+                    if opcode_given == 0xAA {
+                        *a = *y; //TAY
+                    } else {
+                        if opcode_given != 0xe8 {
+                            *y = y.saturating_sub(1); //INY
+                        } else {
+                            *y = y.saturating_add(1); //DEY
+                        }
+                    }
+                }
+                //TXA & TYA
+                0x8A | 0x98 => {
+                    if opcode_given == 0x8A {
+                        *x = *a
+                    } else {
+                        *y = *a
+                    }
+                }
+                _ => (),
+            };
+        }
+        0x60 | 0x20 => {
+            if 0x20 == opcode_given {
+                let [lo, hi] = program_counter.to_le_bytes(); // little-endian order
+                push_to_stack(ram, hi, lo, stack_pointer);
+            };
+        }
         //LDA instruction block
         0xA9 | 0xA5 | 0xB5 | 0xAD | 0xBD | 0xB9 | 0xA1 | 0xB1 => {
             //here we will match and find a value for lda that
@@ -174,8 +223,21 @@ pub fn execute_opcode(
             }
         }
         _ => {
-            panic!("unidentified opcode!")
+            panic!("unidentified opcode -- {:#x}", opcode_given)
         }
     }
     return push_program_counter;
+}
+pub fn push_to_stack(
+    ram: &mut Vec<u8>,
+    next_byte: u8,
+    next_next_byte: u8,
+    stack_pointer: &mut u16,
+) {
+    //gabe forgive me
+    if &stack_pointer < &&mut 0x0100 && &stack_pointer > &&mut 0x01FF {
+        *stack_pointer -= 2;
+    }
+    ram[(*stack_pointer) as usize] = next_byte;
+    ram[(*stack_pointer - 1) as usize] = next_next_byte;
 }
