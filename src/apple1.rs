@@ -52,7 +52,6 @@ impl Apple1 {
             .collect::<Vec<_>>()
             .join("\n");
         println!("found!");
-        println!("{}", cleaned);
 
         println!("tokenizing...");
         asm::compile(&cleaned);
@@ -94,12 +93,10 @@ pub fn run_file(bytes_given: &mut Vec<u8>) -> bool {
     //interrupt so that when the computer is started it
     // is essentially reset
     flag_register = set_flag(flag_register, &INTERRUPTB, true);
-    println!("{:?}", ram);
-    let mut i: u16 = 0;
+    let mut i: u32 = 0;
     while true {
         i += 1;
-        println!("{}", i);
-        let mut program_counter_change: u8 = 0;
+        let mut program_counter_change: u16 = 0;
         let opcode_given = ram[program_counter as usize];
         let next_byte = ram[(program_counter + 1) as usize];
         let next_next_byte = ram[(program_counter + 2) as usize];
@@ -115,8 +112,7 @@ pub fn run_file(bytes_given: &mut Vec<u8>) -> bool {
             &mut flag_register,
             &mut program_counter,
         );
-        println!("the a is {}", a);
-        program_counter += program_counter_change as u16;
+        program_counter = program_counter_change;
     }
 
     return true;
@@ -133,9 +129,51 @@ pub fn execute_opcode(
     ram: &mut Vec<u8>,
     flag_register: &mut u8,
     program_counter: &mut u16,
-) -> u8 {
-    let mut push_program_counter: u8 = 0;
+) -> u16 {
+    let mut push_program_counter: u16 = 0;
     match opcode_given {
+        0x00 => {
+            //BRK impl
+            // first standard behavior, push the pc + 1 to the stack
+            let pc_to_push_stack: u16 = *program_counter + 1;
+            let lo: u8 = (pc_to_push_stack & 0x00ff) as u8;
+            let hi: u8 = (pc_to_push_stack >> 8) as u8;
+            push_to_stack(ram, hi, lo, stack_pointer);
+            // secondly we push the register of the program
+            *flag_register = set_flag(*flag_register, &BREAKB, true);
+            *flag_register = set_flag(*flag_register, &INTERRUPTB, true);
+            push_to_stack(ram, *flag_register, 0x00, stack_pointer);
+            //push to a stack and then let's move the stack pointer back one
+            // because this function takes twice the parameters
+            *stack_pointer += 1;
+            //should be okay, now finally load the BRK interrupt pointer
+            let push_program_counter: u16 = u16::from_le_bytes([ram[0xFFFE], ram[0xFFFF]]);
+        }
+        //STX STY
+        0x86 | 0x96 | 0x8E | 0x84 | 0x94 | 0x8C => {
+            if opcode_given == 0x86 || opcode_given == 0x96 || opcode_given == 0x8E {
+                //stx instructions
+                let where_to_write_stx: u8 = match opcode_given {
+                    0x86 => ram[next_byte as usize],        //zpg
+                    0x96 => ram[(next_byte + *y) as usize], //zpg y
+                    0x8E => ram[u16::from_le_bytes([next_byte, next_next_byte]) as usize], //abs
+                    _ => 0x00,
+                };
+                //set the location equal to x
+                ram[where_to_write_stx as usize] = *x;
+            }
+            if opcode_given == 0x84 || opcode_given == 0x94 || opcode_given == 0x8C {
+                //sty instructions
+                let where_to_write_stx: u8 = match opcode_given {
+                    0x86 => ram[next_byte as usize],        //zpg
+                    0x96 => ram[(next_byte + *x) as usize], //zpg x
+                    0x8E => ram[u16::from_le_bytes([next_byte, next_next_byte]) as usize], //abs
+                    _ => 0x00,
+                };
+                //set the location equal to x
+                ram[where_to_write_stx as usize] = *y;
+            }
+        }
         //Register control block
         0xAA | 0x8A | 0xCA | 0xE8 | 0xA8 | 0x98 | 0x88 | 0xC8 => {
             let register_ctrl_match: () = match opcode_given {
@@ -173,11 +211,23 @@ pub fn execute_opcode(
                 }
                 _ => (),
             };
+            //inc the word
+            push_program_counter += 1;
         }
+        //JSR and RTS
         0x60 | 0x20 => {
             if 0x20 == opcode_given {
+                //JSR
                 let [lo, hi] = program_counter.to_le_bytes(); // little-endian order
                 push_to_stack(ram, hi, lo, stack_pointer);
+                push_program_counter = 1;
+            } else {
+                //RTS
+                let hi: u8 = ram[*program_counter as usize];
+                let lo: u8 = ram[(*program_counter - 1) as usize];
+                *stack_pointer -= 2;
+                let bytes: [u8; 2] = [lo, hi];
+                push_program_counter = u16::from_le_bytes(bytes);
             };
         }
         //LDA instruction block
@@ -238,6 +288,7 @@ pub fn push_to_stack(
     if &stack_pointer < &&mut 0x0100 && &stack_pointer > &&mut 0x01FF {
         *stack_pointer -= 2;
     }
+    //now we just set the ram at the correct low/high byte position
     ram[(*stack_pointer) as usize] = next_byte;
     ram[(*stack_pointer - 1) as usize] = next_next_byte;
 }

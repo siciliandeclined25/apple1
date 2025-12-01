@@ -825,7 +825,7 @@ pub fn compile(buf: &str) -> bool {
 
     let mut file = std::fs::File::create("out.bin").unwrap();
     let mut resized_code: Vec<&u8> = Vec::new();
-    resized_code.resize(4096, &0);
+    resized_code.resize(65536, &0);
     for (i, n) in assembled_code.iter().enumerate() {
         resized_code[i + initial_program_counter as usize] = n
     }
