@@ -27,7 +27,7 @@ pub const RESETVECLOW: u8 = 0xf0;
 pub const RESETVECHIGH: u8 = 0xff;
 pub const INTERRUPVECTLOW: u8 = RESETVECLOW;
 pub const INTERRUPTVECHIGH: u8 = RESETVECHIGH;
-
+pub const DEBUG: bool = true;
 pub struct Apple1 {
     pub fname: String,
 }
@@ -133,6 +133,9 @@ pub fn execute_opcode(
     let mut push_program_counter: u16 = 0;
     match opcode_given {
         0x00 => {
+            if DEBUG {
+                println!("BRK")
+            }
             //BRK impl
             // first standard behavior, push the pc + 1 to the stack
             let pc_to_push_stack: u16 = *program_counter + 1;
@@ -151,6 +154,9 @@ pub fn execute_opcode(
         }
         //STX STY
         0x86 | 0x96 | 0x8E | 0x84 | 0x94 | 0x8C => {
+            if DEBUG {
+                println!("STX/STY")
+            }
             if opcode_given == 0x86 || opcode_given == 0x96 || opcode_given == 0x8E {
                 //stx instructions
                 let where_to_write_stx: u8 = match opcode_given {
@@ -173,9 +179,29 @@ pub fn execute_opcode(
                 //set the location equal to x
                 ram[where_to_write_stx as usize] = *y;
             }
+            //opcode is abs
+            if opcode_given == 0x8C || opcode_given == 0x8E {
+                push_program_counter += 3;
+            } else {
+                push_program_counter += 2;
+            }
+        }
+        //JMP block
+        0x4C | 0x6C => {
+            if opcode_given == 0x4C {
+                push_program_counter = u16::from_be_bytes([next_byte, next_next_byte]);
+            } else {
+                let jump_indirect_address: u16 = u16::from_le_bytes([next_byte, next_next_byte]);
+                let lo: u8 =  ram[jump_indirect_address as usize];
+                let hi: u8 = ram[(jump_indirect_address + 1) as usize];
+                push_program_counter =;
+            }
         }
         //Register control block
         0xAA | 0x8A | 0xCA | 0xE8 | 0xA8 | 0x98 | 0x88 | 0xC8 => {
+            if DEBUG {
+                println!("register control block")
+            }
             let register_ctrl_match: () = match opcode_given {
                 //TAX & INX and DEX
                 0xAA | 0xCA | 0xE8 => {
@@ -216,11 +242,14 @@ pub fn execute_opcode(
         }
         //JSR and RTS
         0x60 | 0x20 => {
+            if DEBUG {
+                println!("JSR/RTS")
+            }
             if 0x20 == opcode_given {
                 //JSR
                 let [lo, hi] = program_counter.to_le_bytes(); // little-endian order
                 push_to_stack(ram, hi, lo, stack_pointer);
-                push_program_counter = 1;
+                push_program_counter += 3;
             } else {
                 //RTS
                 let hi: u8 = ram[*program_counter as usize];
@@ -234,6 +263,9 @@ pub fn execute_opcode(
         0xA9 | 0xA5 | 0xB5 | 0xAD | 0xBD | 0xB9 | 0xA1 | 0xB1 => {
             //here we will match and find a value for lda that
             // will be outputted in LDA match
+            if DEBUG {
+                println!("LDA")
+            }
             let lda_match: u8 = match opcode_given {
                 0xA9 => next_byte,                                                     //LDA imm
                 0xA5 => ram[next_byte as usize],                                       //LDA zpg
